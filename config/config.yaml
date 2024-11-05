@@ -1,0 +1,2 @@
+output_path: "/scratch/indikar_root/indikar1/shared_data/ASW_scanvi_model/"
+input_adata: "/scratch/indikar_root/indikar1/shared_data/sc_HSC/SCANVI/raw_data.h5ad"
