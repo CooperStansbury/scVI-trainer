@@ -16,8 +16,7 @@ OUTPUT = config['output_path']
 
 input_adata = config['input_adata']
 output_adata = OUTPUT + "raw_anndata/adata.h5ad"
-# n_hvg = np.linspace(1000, 15000, 29).astype(int)
-n_hvg = [3000, 6000, 9000, 12000, 15000]
+n_hvg = [(x * 1000) for x in range(1, 16)]
 
 print("\n----- HVG VALUES -----")
 for v in n_hvg:
@@ -33,7 +32,8 @@ rule all:
     input:
         OUTPUT + "raw_anndata/adata.h5ad",
         expand(OUTPUT + "flags/{hvg}.done", hvg=n_hvg),
-        expand(OUTPUT + "benchmarks/{hvg}_benchmark.csv", hvg=n_hvg),
+        expand(OUTPUT + "benchmarks/hvg{hvg}_benchmark.csv", hvg=n_hvg),
+        expand(OUTPUT + "differential_expression/hvg{hvg}_deg.csv", hvg=n_hvg),
       
         
 rule gather:
@@ -68,7 +68,7 @@ rule benchmark_model:
     input:
         flag=OUTPUT + "flags/{hvg}.done"
     output:
-        flag=OUTPUT + "benchmarks/{hvg}_benchmark.csv",
+        flag=OUTPUT + "benchmarks/hvg{hvg}_benchmark.csv",
     conda:
         "scanpy"
     params:
@@ -78,6 +78,21 @@ rule benchmark_model:
         python scripts/benchmark.py {params.adata} {output}
         """
 
+rule get_deg:
+    input:
+        flag=OUTPUT + "flags/{hvg}.done"
+    output:
+        OUTPUT + 'differential_expression/hvg{hvg}_deg.csv'
+    conda:
+        "scanpy"
+    params:
+        adata=OUTPUT + "imputed_adata/hvg{hvg}.h5ad",
+        model=OUTPUT + "models/"
+    shell:
+        """
+        python scripts/extract_deg.py {params.adata} {params.model} {output}
+        """
+    
 
 
 

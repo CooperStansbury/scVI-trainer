@@ -75,8 +75,7 @@ def check_directory(dir_path):
     required_subdirs = [
         "models", 
         "training_metrics", 
-        "benchmarks", 
-        "results",
+        "predictions",
         "imputed_adata", 
         "checkpoints",
     ]
@@ -106,30 +105,10 @@ def get_loss_history(model):
   return metrics
 
 
-def check_directory(dir_path):
-    """
-    Checks for the existence of specific subdirectories within a given directory 
-    and creates them if they don't exist.
-
-    Args:
-      dir_path: The path to the main directory.
-    """
-
-    required_subdirs = [
-        "models", 
-        "training_metrics", 
-        "benchmarks", 
-        "results",
-        "imputed_adata", 
-        "model_checkpoints",
-    ]
-
-    for subdir in required_subdirs:
-        subdir_path = os.path.join(dir_path, subdir)
-        if not os.path.exists(subdir_path):
-            print(f"Subdirectory '{subdir_path}' does not exist. Creating it...")
-            os.makedirs(subdir_path)
-            print(f"Subdirectory '{subdir_path}' successfully created.")
+def filter_cell_types(adata, keep_types, column='standard_cell_type'):
+    """A function to filter for certain cell types """
+    adata = adata[adata.obs['standard_cell_type'].isin(keep_types), :].copy()
+    return adata
 
 
 def get_loss_history(model):
@@ -149,19 +128,16 @@ def get_loss_history(model):
   return metrics
 
 
-
-
-
 def train_scvi_model(
     adata,
     batch_key="dataset",
     layer="counts",
     labels_key="cell_label",
     epochs=400,
-    n_latent=40,
+    n_latent=36,
     n_hidden=256,
     dropout_rate=0.2,
-    n_layers=3,
+    n_layers=2,
     batch_size=10000,
     plan_kwargs=None,  
     dirpath=None,
@@ -213,7 +189,7 @@ def train_scvi_model(
     model = scvi.model.SCVI(
       adata,
       use_layer_norm="both",
-      use_batch_norm="none",
+      use_batch_norm="both",
       n_latent=n_latent,
       n_hidden=n_hidden,
       encode_covariates=True,
@@ -236,11 +212,10 @@ def train_scvi_model(
         devices="auto",
         enable_model_summary=True,
         batch_size=batch_size,
-        load_sparse_tensor=True,
         plan_kwargs=plan_kwargs,
         early_stopping=True,
         early_stopping_patience=5,
-        early_stopping_monitor='elbo_validation',
+        early_stopping_monitor='validation_loss',
         enable_checkpointing=True,
         callbacks=[checkpointer],
     )
@@ -337,12 +312,14 @@ if __name__ == "__main__":
     n_hvg = sys.argv[2]
     output_dir = sys.argv[3]
 
+    global_time = time.time()
+
     EPOCHS = 500
 
-    print(f"\n--- Running train_model.py ---")  # Added print statement
-    print(f"adata_path: {adata_path}")  # Added print statement
-    print(f"n_hvg: {n_hvg}")  # Added print statement
-    print(f"output_dir: {output_dir}")  # Added print statement
+    print(f"\n--- Running train_model.py ---")  
+    print(f"adata_path: {adata_path}") 
+    print(f"n_hvg: {n_hvg}")
+    print(f"output_dir: {output_dir}")  
 
     # handle output path
     check_directory(output_dir)
@@ -352,7 +329,7 @@ if __name__ == "__main__":
 
     # load input data
     adata = sc.read_h5ad(adata_path)
-    adata.X = adata.layers['counts'].copy() # TODO: don't hardcode thie
+    adata.X = adata.layers['counts'].copy() 
     print(f"\n------------ raw data ------------")
     print(adata)
     
@@ -367,13 +344,28 @@ if __name__ == "__main__":
 
     print(f"--- FILTERING DATA ---")
     MIN_GENES = 1000
-    MIN_CELLS = 500
+    MIN_CELLS = 250
     
     adata = preprocess_adata(
         adata, 
         min_genes=MIN_GENES,
         min_cells=MIN_CELLS,
     )
+
+    # # filter cell types
+    # keep_types = [
+    #     'Fib',
+    #     'iHSC',
+    #     'HSC',
+    # ]
+    # adata = filter_cell_types(adata, keep_types)
+
+    # randomly shuffle the data
+    shuffled_indices = np.random.permutation(adata.n_obs)
+    adata = adata[shuffled_indices, :].copy()
+    
+    print(f"\n------------ filtered data ------------")
+    print(adata)
     
     # split data into query and reference sets
     rdata, qdata = get_datasplit(adata)
@@ -383,7 +375,7 @@ if __name__ == "__main__":
     print(qdata.obs["cell_label"].value_counts())
     print()
 
-    print(f"--- SELECTING FEATURES ---")
+    print(f"\n--- SELECTING FEATURES ---")
     sc.pp.highly_variable_genes(
         rdata, 
         n_top_genes=int(n_hvg),
@@ -392,23 +384,22 @@ if __name__ == "__main__":
         batch_key='dataset',
     )
 
+    print(f"\n------------ trainning data ------------")
+    print(rdata)
+
     """
     scVI MODEL
     """
-    print(f"--- TRAINNING scVI MODEL ---")
+    print(f"\n--- TRAINNING scVI MODEL ---")
     plan_kwargs = {
-          "lr": 0.001,
-          "n_epochs_kl_warmup": 10,
-          "reduce_lr_on_plateau": True,
-          "lr_patience": 8,
-          "lr_factor": 0.1,
+          "lr": 0.0001,
       }
 
     scvi_model = train_scvi_model(
         rdata,
         plan_kwargs=plan_kwargs,
         epochs=EPOCHS,
-        dirpath=f"{output_dir}checkpoints/",
+        dirpath=f"{output_dir}checkpoints/{model_name}",
     )
 
     # store the model
@@ -428,12 +419,12 @@ if __name__ == "__main__":
     """
     scANVI MODEL
     """
-    print(f"--- TRAINNING scANVI MODEL ---")
+    print(f"\n--- TRAINNING scANVI MODEL ---")
     scanvi_model = train_scanvi_model(
         scvi_model,
         plan_kwargs=plan_kwargs,
         epochs=EPOCHS,
-        dirpath=f"{output_dir}checkpoints/",
+        dirpath=f"{output_dir}checkpoints/{model_name}",
     )
 
     # store the model
@@ -451,35 +442,19 @@ if __name__ == "__main__":
     scanvi_metrics.to_csv(outpath, index=False)
 
     """
-    Differential Expression
-    """
-    print(f"--- DEG TESTING ---")
-    torch.cuda.empty_cache()
-    deg = scanvi_model.differential_expression(
-        rdata,
-        groupby='cell_label',
-        batch_correction=True,
-        filter_outlier_cells=True,
-    )
-    outpath = f"{output_dir}results/{model_name}_scanvi_DEG.csv"
-    deg = deg.reset_index()
-    deg.to_csv(outpath, index=False,)
-
-    """
     Latent Representations and Counts
     """
-    print(f"--- COMPUTING EMBEDDINGS AND COUNTS ---")
+    print(f"\n--- COMPUTING EMBEDDINGS AND COUNTS ---")
     rdata.obsm['X_scvi'] = scvi_model.get_latent_representation()
     rdata.obsm['X_scanvi'] = scanvi_model.get_latent_representation()
 
     # get batch-corrected counts
-    rdata.layers['scvi_counts'] = scvi_model.get_normalized_expression(return_mean=False)
     rdata.layers['scanvi_counts'] = scanvi_model.get_normalized_expression(return_mean=False)
 
     """
     scVI Query Mapping
     """
-    print(f"--- QUERY MAPPING (scVI) ---")
+    print(f"\n--- QUERY MAPPING (scVI) ---")
     scvi.model.SCVI.prepare_query_anndata(
         qdata, 
         scvi_model,
@@ -499,12 +474,11 @@ if __name__ == "__main__":
     )
     
     qdata.obsm['X_scvi'] = scvi_query.get_latent_representation()
-    qdata.layers['scvi_counts'] = scvi_query.get_normalized_expression(return_mean=False)
 
     """
     scANVI Query Mapping
     """
-    print(f"--- QUERY MAPPING (scANVI) ---")
+    print(f"\n--- QUERY MAPPING (scANVI) ---")
     scvi.model.SCANVI.prepare_query_anndata(
         qdata, 
         scanvi_model,
@@ -527,7 +501,7 @@ if __name__ == "__main__":
     qdata.layers['scanvi_counts'] = scanvi_query.get_normalized_expression(return_mean=False)
 
     # store predictions
-    outpath = f"{output_dir}results/{model_name}_predictions.csv"
+    outpath = f"{output_dir}predictions/{model_name}_predictions.csv"
     pred_proba = scanvi_query.predict(soft=True)
     pred_proba['prediction'] = pred_proba.idxmax(axis=1)
     pred_proba = pred_proba.reset_index(drop=False, names='cell_id')
@@ -538,9 +512,9 @@ if __name__ == "__main__":
     """
     idata = an.concat([rdata, qdata], label="batch")
 
-    # sc.pp.subsample(idata, n_obs=10000)
-    # sorted_indices = idata.obs['dataset'].sort_values().index 
-    # idata = idata[sorted_indices, :].copy()
+    # sort required for scanorama
+    sorted_indices = idata.obs['dataset'].sort_values().index 
+    idata = idata[sorted_indices, :].copy()
 
    # build some convenience attributes
     start_time = time.time()
@@ -552,7 +526,7 @@ if __name__ == "__main__":
     end_time = time.time()
     print(f"PCA completed in {end_time - start_time:.2f} seconds")
     
-    print(f"--- HARMONIZATION AND OUTPUT ---")
+    print(f"\n--- HARMONIZATION AND OUTPUT ---")
     start_time = time.time()
     sce.pp.scanorama_integrate(
         idata, 
@@ -583,7 +557,6 @@ if __name__ == "__main__":
     start_time = time.time()
     sc.tl.umap(
         idata, 
-        min_dist=0.25, 
         method='rapids',
     )
     end_time = time.time()
@@ -595,6 +568,11 @@ if __name__ == "__main__":
     end_time = time.time()
     print(f"Saving AnnData completed in {end_time - start_time:.2f} seconds")
 
+    # final time reporting
+    total_time = end_time - global_time
+    minutes = int(total_time // 60)
+    seconds = int(total_time % 60)
+    print(f"Full execution took: {minutes} minutes and {seconds} seconds")
 
 
 
