@@ -1,21 +1,42 @@
 # scVI and SCANVI Training Pipeline
 
-This repository provides a Python script for training and evaluating scVI and SCANVI models on single-cell RNA sequencing data. The script includes functionality for data preprocessing, model training, and result analysis.
+This repository contains a Snakemake workflow and helper scripts for training [scVI](https://scvi-tools.org/) and SCANVI models on single-cell RNA sequencing data.
+The pipeline performs data preprocessing, model training, benchmarking and differential expression analyses.
 
 ## Features
 
-* **Data Preprocessing:** Filters cells and genes, structures annotation labels, and removes mitochondrial genes.
-* **Model Training:** Trains scVI and SCANVI models with customizable parameters.
-* **Result Analysis:**  Extracts training metrics, performs differential expression analysis, and generates latent representations.
-* **Query Mapping:** Maps query datasets to the reference latent space using trained models.
-* **Integration Benchmarking:**  Evaluates the performance of different integration methods (PCA, Scanorama, Harmony, scVI, SCANVI).
+* **Data preprocessing** – filters cells and genes, manages annotation labels and removes mitochondrial genes.
+* **Model training** – trains scVI and SCANVI models with customizable parameters and checkpointing.
+* **Query mapping** – maps query data sets into a trained reference latent space.
+* **Benchmarking** – evaluates embeddings using PCA, Scanorama, Harmony, scVI and SCANVI.
+* **Result extraction** – exports training metrics and differential expression results.
 
-## Requirements
+## Installation
 
-* Python 3.8+
-* scVI
-* scanpy
-* anndata
-* scib-metrics
-* sklearn
-* torch
+Create the conda environment used by the workflow:
+
+```bash
+mamba env create -f environment.yml
+```
+
+Activate the environment before running the pipeline.
+
+## Usage
+
+Edit `config/config.yaml` to point to your input AnnData file and desired output directory.
+The workflow can then be executed locally with
+
+```bash
+snakemake --use-conda --cores 4 -s Snakefile
+```
+
+For HPC execution a Slurm profile is provided under `config/gpu` (see the README in that directory).
+
+Individual steps can also be run directly via the scripts in `scripts/`.
+
+## Repository layout
+
+* `scripts/` – Python scripts used in the workflow.
+* `config/` – configuration files and cluster profiles.
+* `notebooks/` – example notebooks exploring various parts of the pipeline.
+
